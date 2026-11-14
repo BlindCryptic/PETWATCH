@@ -34,6 +34,7 @@ type HistoryRecord = {
   unit: "g" | "ml";
   status: "Successful" | "Failed";
   schedule: string;
+  method?: "Automatic" | "Manual";
 };
 
 const navItems: { id: Page; label: string; icon: IconName }[] = [
@@ -285,7 +286,8 @@ type IconName =
   | "x"
   | "info"
   | "history"
-  | "search";
+  | "search"
+  | "thermometer";
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -320,6 +322,12 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
       <>
         <circle cx="11" cy="11" r="7" />
         <path d="m20 20-4-4" />
+      </>
+    ),
+    thermometer: (
+      <>
+        <path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0Z" />
+        <path d="M12 11v6" />
       </>
     ),
     bell: (
@@ -531,8 +539,9 @@ function App() {
   const [now, setNow] = useState(new Date());
   const [schedules, setSchedules] = useState(initialSchedules);
   const [alerts, setAlerts] = useState(initialAlerts);
-  const [amount, setAmount] = useState(85);
+  const [amount, setAmount] = useState("85");
   const [savedAmount, setSavedAmount] = useState(85);
+  const [historyEntries, setHistoryEntries] = useState(historyRecords);
   const [toast, setToast] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -688,8 +697,37 @@ function App() {
   };
 
   const applyAmount = () => {
-    setSavedAmount(amount);
-    setToast(`Food amount set to ${amount} g`);
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 20 || parsedAmount > 150) {
+      const boundedAmount = Number.isFinite(parsedAmount) ? parsedAmount : 20;
+      const correctedAmount = Math.min(150, Math.max(20, boundedAmount));
+      setAmount(String(correctedAmount));
+      setToast("Food amount must be between 20 g and 150 g");
+      return;
+    }
+    setSavedAmount(parsedAmount);
+    setToast(`Food amount set to ${parsedAmount} g`);
+  };
+
+  const dispenseManually = () => {
+    const timestamp = new Date();
+    setHistoryEntries((entries) => [
+      {
+        id: Date.now(),
+        date: dateInputValue(0),
+        time: `${String(timestamp.getHours()).padStart(2, "0")}:${String(
+          timestamp.getMinutes(),
+        ).padStart(2, "0")}`,
+        type: "Food",
+        amount: savedAmount,
+        unit: "g",
+        status: "Successful",
+        schedule: "Manual dispense",
+        method: "Manual",
+      },
+      ...entries,
+    ]);
+    setToast(`${savedAmount} g dispensed manually`);
   };
 
   const unreadCount = alerts.filter((alert) => alert.unread).length;
@@ -706,7 +744,7 @@ function App() {
   const filteredHistory = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return historyRecords.filter((record) => {
+    return historyEntries.filter((record) => {
       const recordDate = parseLocalDate(record.date);
       const age = Math.floor((today.getTime() - recordDate.getTime()) / 86400000);
       const inRange =
@@ -724,10 +762,11 @@ function App() {
         !query ||
         record.schedule.toLowerCase().includes(query) ||
         record.type.toLowerCase().includes(query) ||
-        record.status.toLowerCase().includes(query);
+        record.status.toLowerCase().includes(query) ||
+        (record.method ?? "Automatic").toLowerCase().includes(query);
       return inRange && matchesType && matchesStatus && matchesSearch;
     });
-  }, [historyRange, historyType, historyStatus, historySearch, customFrom, customTo]);
+  }, [historyEntries, historyRange, historyType, historyStatus, historySearch, customFrom, customTo]);
 
   const historySummary = useMemo(
     () => ({
@@ -835,9 +874,7 @@ function App() {
             <p>{headerSubtitle}</p>
           </div>
           <div className="topbar-actions">
-            <span className="sample-pill">
-              <Icon name="info" size={15} /> Illustrative sample data
-            </span>
+            
             <button
               className="notification-button"
               onClick={() => navigate("alerts")}
@@ -927,6 +964,41 @@ function App() {
                     </div>
                   </div>
                 </div>
+              </section>
+
+              <section className="card temperature-card">
+                <div className="section-heading">
+                  <div>
+                    <span className="eyebrow">Food storage</span>
+                    <h2>Temperature monitor</h2>
+                  </div>
+                  <span className="temperature-status">In range</span>
+                </div>
+                <div className="temperature-reading">
+                  <span className="metric-icon neutral">
+                    <Icon name="thermometer" />
+                  </span>
+                  <strong>4.2<small>°C</small></strong>
+                </div>
+                <div className="temperature-track" aria-hidden="true">
+                  <span />
+                </div>
+                <p>Ideal food storage range: 0–5 °C</p>
+              </section>
+
+              <section className="card manual-dispense-card">
+                <span className="metric-icon food">
+                  <Icon name="bowl" />
+                </span>
+                <span className="eyebrow">Manual control</span>
+                <h2>Dispense food now</h2>
+                <p>
+                  Serve the current portion size of {savedAmount} g. This action will be saved in
+                  history.
+                </p>
+                <button className="primary-button full" onClick={dispenseManually}>
+                  <Icon name="plus" size={17} /> Dispense {savedAmount} g
+                </button>
               </section>
 
               <section className="card daily-card">
@@ -1056,10 +1128,8 @@ function App() {
           <div className="page">
             <div className="page-actions">
               <div className="sample-note">
-                <Icon name="info" size={17} />
-                <span>
-                  Schedules below are sample configurations and do not control connected hardware.
-                </span>
+                
+                
               </div>
               <button className="primary-button" onClick={openNewSchedule}>
                 <Icon name="plus" size={18} /> Add schedule
@@ -1144,7 +1214,7 @@ function App() {
                 <label htmlFor="food-amount">Editable amount</label>
                 <div className="stepper">
                   <button
-                    onClick={() => setAmount(Math.max(20, amount - 5))}
+                    onClick={() => setAmount(String(Math.max(20, (Number(amount) || 20) - 5)))}
                     aria-label="Decrease by 5 grams"
                   >
                     −
@@ -1155,16 +1225,21 @@ function App() {
                       type="number"
                       min="20"
                       max="150"
-                      step="5"
+                      step="1"
                       value={amount}
-                      onChange={(event) =>
-                        setAmount(Math.min(150, Math.max(20, Number(event.target.value))))
-                      }
+                      onChange={(event) => setAmount(event.target.value)}
+                      onBlur={() => {
+                        if (!amount) return;
+                        const parsedAmount = Number(amount);
+                        if (Number.isFinite(parsedAmount)) {
+                          setAmount(String(Math.min(150, Math.max(20, parsedAmount))));
+                        }
+                      }}
                     />
                     <span>g</span>
                   </div>
                   <button
-                    onClick={() => setAmount(Math.min(150, amount + 5))}
+                    onClick={() => setAmount(String(Math.min(150, (Number(amount) || 20) + 5)))}
                     aria-label="Increase by 5 grams"
                   >
                     +
@@ -1176,8 +1251,8 @@ function App() {
                   min="20"
                   max="150"
                   step="5"
-                  value={amount}
-                  onChange={(event) => setAmount(Number(event.target.value))}
+                  value={Math.min(150, Math.max(20, Number(amount) || 20))}
+                  onChange={(event) => setAmount(event.target.value)}
                   aria-label="Food amount in grams"
                 />
                 <div className="range-labels">
@@ -1187,13 +1262,11 @@ function App() {
                 <button
                   className="primary-button full"
                   onClick={applyAmount}
-                  disabled={amount === savedAmount}
+                  disabled={Number(amount) === savedAmount}
                 >
                   Apply amount
                 </button>
-                <small className="hardware-note">
-                  <Icon name="info" size={15} /> Sample setting only; no hardware command is sent.
-                </small>
+                
               </aside>
             </div>
           </div>
@@ -1244,7 +1317,7 @@ function App() {
                 <div>
                   <span className="eyebrow">History</span>
                   <h2>Food & water consumption</h2>
-                  <p>Illustrative sample data</p>
+                  
                 </div>
                 <div className="chart-controls">
                   <div className="segment-control" aria-label="Date range">
@@ -1280,10 +1353,7 @@ function App() {
                 </span>
               </div>
               <ConsumptionChart mode={chartMode} range={dateRange} />
-              <p className="chart-footnote">
-                <Icon name="info" size={15} /> Values are sample readings for interface
-                demonstration.
-              </p>
+              
             </section>
           </div>
         )}
@@ -1346,6 +1416,7 @@ function App() {
                     type="search"
                     aria-label="Search dispensing history"
                     placeholder="Search schedule or status"
+                    autoComplete="off"
                     value={historySearch}
                     onChange={(event) => setHistorySearch(event.target.value)}
                   />
@@ -1479,10 +1550,17 @@ function App() {
                             </span>
                           </td>
                           <td data-label="Status">
-                            <span className={`operation-status ${record.status.toLowerCase()}`}>
-                              <i />
-                              {record.status}
-                            </span>
+                            <div className="history-status-cell">
+                              <span className={`operation-status ${record.status.toLowerCase()}`}>
+                                <i />
+                                {record.status}
+                              </span>
+                              <span
+                                className={`dispense-method ${(record.method ?? "Automatic").toLowerCase()}`}
+                              >
+                                {record.method ?? "Automatic"}
+                              </span>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1510,7 +1588,7 @@ function App() {
                 </div>
               )}
               <div className="history-footer">
-                Showing {filteredHistory.length} of {historyRecords.length} sample records
+                Showing {filteredHistory.length} of {historyEntries.length} records
               </div>
             </section>
           </div>
@@ -1549,7 +1627,7 @@ function App() {
                   <h2>{alertFilter === "All" ? "All alerts" : alertFilter}</h2>
                 </div>
                 <span>
-                  {filteredAlerts.length} sample {filteredAlerts.length === 1 ? "alert" : "alerts"}
+                  {filteredAlerts.length} {filteredAlerts.length === 1 ? "alert" : "alerts"}
                 </span>
               </div>
               {filteredAlerts.length > 0 ? (
